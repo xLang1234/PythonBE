@@ -73,7 +73,8 @@ def get_db():
     finally:
         db.close()
 
-def save_tweet(db, entity_id, tweet):
+def save_tweet(db, entity_id, tweet, raw_data_tweet):
+    print("🚀 ~ save_tweet ~ tweet:", tweet)
     """Save a tweet to the raw_content table"""
     try:
         # Format engagement metrics
@@ -83,32 +84,35 @@ def save_tweet(db, entity_id, tweet):
             "replies": tweet.public_metrics.get("reply_count", 0) if hasattr(tweet, "public_metrics") else 0,
             "quotes": tweet.public_metrics.get("quote_count", 0) if hasattr(tweet, "public_metrics") else 0
         }
-        
+        print("check1")
         # Check if tweet already exists
         existing = db.query(RawContent).filter(
             RawContent.entity_id == entity_id,
-            RawContent.external_id == tweet.id
+            RawContent.external_id == raw_data_tweet.id
         ).first()
         
+        print("check2")
         if existing:
-            logger.debug(f"Tweet {tweet.id} already exists in database")
+            logger.debug(f"Tweet {raw_data_tweet.id} already exists in database")
             return existing.id
-            
+        
+        print("check3")
         # Create new raw_content record
         raw_content = RawContent(
             entity_id=entity_id,
-            external_id=tweet.id,
+            external_id=raw_data_tweet.id,
             content_type="tweet",
-            content=tweet.text,
-            published_at=tweet.created_at,
+            content=raw_data_tweet.text,
+            published_at=raw_data_tweet.created_at,
             engagement_metrics=engagement,
-            raw_data=tweet._json if hasattr(tweet, "_json") else json.dumps(tweet.__dict__, default=str)
+            raw_data=raw_data_tweet._json if hasattr(raw_data_tweet, "_json") else json.dumps(raw_data_tweet.__dict__, default=str)
         )
         
+        print("check4")
         db.add(raw_content)
         db.commit()
         db.refresh(raw_content)
-        logger.info(f"Saved tweet {tweet.id} to database")
+        logger.info(f"Saved tweet {raw_data_tweet.id} to database")
         return raw_content.id
         
     except Exception as e:

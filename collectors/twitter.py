@@ -2,9 +2,10 @@ import asyncio
 from datetime import datetime, timedelta
 from loguru import logger
 import time
+import os
 from twikit import Client
 
-from config.settings import MAX_TWEETS_PER_COLLECTION
+from config.settings import MAX_TWEETS_PER_COLLECTION, TWITTER_USERNAME, TWITTER_EMAIL, TWITTER_PASSWORD, COOKIES_FILE
 from database.postgres import get_db, get_active_twitter_entities, save_tweet, get_or_create_twitter_source, Entity
 
 class TwitterScraper:
@@ -15,26 +16,40 @@ class TwitterScraper:
     def initialize_client(self):
         """Initialize the Twikit scraper client"""
         try:
-            self.client = Client()
+            self.client = Client('en-US')
             logger.info("Twikit Twitter scraper initialized")
         except Exception as e:
             logger.error(f"Failed to initialize Twikit Twitter scraper: {str(e)}")
             raise
+    
+    async def login(self):
+        """Login to Twitter using credentials from settings"""
+        try:
+            await self.client.login(
+                auth_info_1=TWITTER_USERNAME,
+                auth_info_2=TWITTER_EMAIL,
+                password=TWITTER_PASSWORD,
+                cookies_file=COOKIES_FILE
+            )
+            logger.info(f"Successfully logged in as {TWITTER_USERNAME}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to login to Twitter: {str(e)}")
+            return False
             
     async def get_user_by_username(self, username):
         """Get a Twitter user by username"""
         try:
             user = await self.client.get_user_by_screen_name(username)
-            print(user)
+            print("🚀 ~ user:", user.__dict__)
             user_data = {
                 'id': user.id,
                 'name': user.name,
-                'username': user.username,
+                'username': user.screen_name,
                 'description': user.description,
                 'public_metrics': {
                     'followers_count': user.followers_count,
                     'following_count': user.following_count,
-                    'tweet_count': user.tweet_count
                 }
             }
             return user_data
@@ -43,18 +58,9 @@ class TwitterScraper:
             return None
             
     async def add_entity_to_db(self, db, username):
-        print("db info:")
-        print(f"Session identity map: {db.identity_map}")
-        print(f"Is active: {db.is_active}")
-        print(f"In transaction: {db.in_transaction()}")
-        print(f"Dirty objects: {db.dirty}")
-        print(f"New objects: {db.new}")
-        print(username)
         """Add a Twitter user as an entity to the database"""
         try:
             twitter_source = get_or_create_twitter_source(db)
-            print("Source object attributes:")
-            print(f"Source __dict__: {twitter_source.__dict__}")
             user_info = await self.get_user_by_username(username)
             if not user_info:
                 logger.error(f"Could not find Twitter user: {username}")
@@ -94,8 +100,8 @@ class TwitterScraper:
     async def collect_user_tweets(self, entity_id, user_id, db, days_back=1):
         """Collect tweets from a specific user"""
         try:
-            start_time = datetime.utcnow() - timedelta(days=days_back)
-            tweets = await self.client.get_user_tweets(user_id, limit=MAX_TWEETS_PER_COLLECTION)
+            start_time = datetime.now() - timedelta(days=days_back)
+            tweets = await self.client.get_user_tweets(user_id, 'Tweets', count=MAX_TWEETS_PER_COLLECTION)
             
             if not tweets:
                 logger.info(f"No new tweets found for user {user_id}")
@@ -103,24 +109,23 @@ class TwitterScraper:
                 
             count = 0
             for tweet in tweets:
+                print("line 112 : ", tweet.__dict__)
                 try:
-                    if tweet.created_at < start_time:
-                        continue
+                    tweet_created_at = tweet.created_at
+                    tweet_created_at = datetime.strptime(tweet_created_at, '%a %b %d %H:%M:%S %z %Y')
+                    # if tweet_created_at < start_time:
+                    #     continue
                         
+                    # Create tweet data structure matching the save_tweet function expectations
                     tweet_data = {
                         'id': tweet.id,
                         'text': tweet.text,
-                        'created_at': tweet.created_at,
+                        'created_at': tweet_created_at,
                         'public_metrics': {
-                            'retweet_count': tweet.retweet_count,
-                            'reply_count': tweet.reply_count,
-                            'like_count': tweet.like_count,
-                            'quote_count': tweet.quote_count
-                        },
-                        'context_annotations': []
+                        }
                     }
                     
-                    save_tweet(db, entity_id, tweet_data)
+                    save_tweet(db, entity_id, tweet_data, tweet)
                     count += 1
                 except Exception as e:
                     logger.error(f"Error saving tweet {tweet.id}: {str(e)}")
@@ -129,20 +134,20 @@ class TwitterScraper:
             logger.info(f"Collected {count} tweets for user {user_id}")
             return count
             
-        except e:
-            logger.error(f"Twitter error collecting tweets for {user_id}: {str(e)}")
+        except Exception as e:
+            logger.error(f"Error collecting tweets for {user_id}: {str(e)}")
             if "429" in str(e):
                 logger.warning("Rate limit hit. Sleeping for 15 minutes.")
                 await asyncio.sleep(900)
-            return 0
-        except Exception as e:
-            logger.error(f"Error collecting tweets for {user_id}: {str(e)}")
             return 0
     
     async def collect_all(self):
         """Collect tweets from all active entities"""
         db = next(get_db())
         try:
+            # First ensure we're logged in
+            await self.login()
+            
             entities = get_active_twitter_entities(db)
             logger.info(f"Found {len(entities)} active Twitter entities")
             
@@ -155,6 +160,7 @@ class TwitterScraper:
                         db
                     )
                     total_collected += count
+                    await asyncio.sleep(2)  # Add a small delay between requests to avoid rate limits
                 except Exception as e:
                     logger.error(f"Error collecting tweets for entity {entity.username}: {str(e)}")
                     continue
@@ -175,27 +181,18 @@ def add_default_crypto_accounts():
     scraper = TwitterScraper()
     db = next(get_db())
     try:
+        # First login to Twitter
+        run_async(scraper.login())
+        
         default_accounts = [
             "coinbase",
-            "binance",
+            "binance", 
             "cz_binance",
             "ethereum",
             "VitalikButerin",
             "SBF_FTX",
-            "CryptoHayes",
             "saylor",
             "elonmusk",
-            "BTCTN",
-            "DocumentingBTC",
-            "BitcoinMagazine",
-            "APompliano",
-            "gladstein",
-            "DeFi_Dad",
-            "hasufl",
-            "ethereumJoseph",
-            "TheCryptoLark",
-            "CoinDesk",
-            "Cointelegraph"
         ]
         
         added = 0
@@ -204,6 +201,7 @@ def add_default_crypto_accounts():
                 entity_id = run_async(scraper.add_entity_to_db(db, username))
                 if entity_id:
                     added += 1
+                time.sleep(1)  # Add a small delay between requests
             except Exception as e:
                 logger.error(f"Error adding account {username}: {str(e)}")
                 continue
