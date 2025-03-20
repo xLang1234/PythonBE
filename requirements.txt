@@ -1,0 +1,31 @@
+numpy==2.2.3
+pandas==2.2.3
+# Twitter scraping
+twikit==2.3.3
+
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.28
+
+# Environment variables
+python-dotenv==1.0.1
+
+# Scheduling
+schedule==1.2.1
+
+# Processing
+nltk==3.8.1
+textblob==0.17.1
+
+# Logging
+loguru==0.7.2
+
+# API (if needed)
+fastapi==0.110.0
+uvicorn==0.27.1
+
+# Testing
+pytest==7.4.4
+
+# Async support
+asyncio==3.4.3
