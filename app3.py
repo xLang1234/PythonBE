@@ -12,7 +12,6 @@ HODLer Airdrops Token Rewards: 30,000,000 BMT (3% of max token supply)
 https://www.binance.com/en/support/announcement/detail/6539265e571540298fa4b7943140469d"""
 
 
-
 vectorizer = TfidfVectorizer()
 tfidf_matrix = vectorizer.fit_transform([news_1, news_2])
 
