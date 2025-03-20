@@ -77,6 +77,15 @@ def save_tweet(db, entity_id, tweet, raw_data_tweet):
     print("🚀 ~ save_tweet ~ tweet:", tweet)
     """Save a tweet to the raw_content table"""
     try:
+        if hasattr(raw_data_tweet, "text") and raw_data_tweet.text.startswith("RT @"):
+            logger.info(f"Skipping retweet: {raw_data_tweet.id}")
+            return None
+        
+        # Alternatively, check for retweeted_status attribute which Twitter API uses to indicate retweets
+        if hasattr(raw_data_tweet, "retweeted_status"):
+            logger.info(f"Skipping retweet: {raw_data_tweet.id}")
+            return None
+        
         # Format engagement metrics
         engagement = {
             "likes": tweet.public_metrics.get("like_count", 0) if hasattr(tweet, "public_metrics") else 0,
