@@ -41,7 +41,7 @@ class TwitterScraper:
         """Get a Twitter user by username"""
         try:
             user = await self.client.get_user_by_screen_name(username)
-            print("🚀 ~ user:", user.__dict__)
+            
             user_data = {
                 'id': user.id,
                 'name': user.name,
@@ -109,7 +109,6 @@ class TwitterScraper:
                 
             count = 0
             for tweet in tweets:
-                print("line 112 : ", tweet.__dict__)
                 try:
                     tweet_created_at = tweet.created_at
                     tweet_created_at = datetime.strptime(tweet_created_at, '%a %b %d %H:%M:%S %z %Y')
@@ -189,10 +188,9 @@ def add_default_crypto_accounts():
             "binance", 
             "cz_binance",
             "ethereum",
-            "VitalikButerin",
-            "SBF_FTX",
             "saylor",
             "elonmusk",
+            "SECGov",
         ]
         
         added = 0
@@ -201,7 +199,7 @@ def add_default_crypto_accounts():
                 entity_id = run_async(scraper.add_entity_to_db(db, username))
                 if entity_id:
                     added += 1
-                time.sleep(1)  # Add a small delay between requests
+                time.sleep(3)  # Add a small delay between requests
             except Exception as e:
                 logger.error(f"Error adding account {username}: {str(e)}")
                 continue

@@ -16,6 +16,7 @@ schedule>=1.2.1
 # Processing
 nltk>=3.8.1
 textblob>=0.17.1
+langdetect>=1.0.9  # Added for language detection
 
 # Logging
 loguru>=0.7.2

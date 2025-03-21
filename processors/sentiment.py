@@ -159,15 +159,17 @@ class SentimentAnalyzer:
         """Process unprocessed content from the database"""
         db = next(get_db())
         try:
-            # Get unprocessed content
+            # Get unprocessed content - only English content
             unprocessed = db.query(RawContent).outerjoin(
                 ProcessedContent, 
                 RawContent.id == ProcessedContent.raw_content_id
             ).filter(
-                ProcessedContent.id == None
+                ProcessedContent.id == None,
+                # Only process English content or content where language is not specified
+                (RawContent.language == 'en') | (RawContent.language == None) | (RawContent.language == 'unknown')
             ).limit(limit).all()
             
-            logger.info(f"Found {len(unprocessed)} unprocessed content items")
+            logger.info(f"Found {len(unprocessed)} unprocessed English content items")
             
             processed_count = 0
             for content in unprocessed:

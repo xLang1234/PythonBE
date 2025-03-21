@@ -3,6 +3,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from loguru import logger
 import json
+from langdetect import detect, LangDetectException
 
 from config.settings import DB_URL, MIN_TWEET_WORD_COUNT
 
@@ -51,6 +52,7 @@ class RawContent(Base):
     collected_at = Column(TIMESTAMP(timezone=True), server_default="now()")
     engagement_metrics = Column(JSON)
     raw_data = Column(JSON)
+    language = Column(String(10), default="en")  # Added language field
 
 class ProcessedContent(Base):
     __tablename__ = "processed_content"
@@ -73,19 +75,44 @@ def get_db():
     finally:
         db.close()
 
+def is_english_text(text):
+    """Detect if text is in English"""
+    try:
+        # Remove URLs, mentions and hashtags to improve detection
+        clean_text = ' '.join(word for word in text.split() 
+                      if not word.startswith('http') 
+                      and not word.startswith('@')
+                      and not word.startswith('#'))
+        
+        # Skip empty text after cleaning
+        if not clean_text.strip():
+            return False
+            
+        lang = detect(clean_text)
+        return lang == 'en'
+    except LangDetectException:
+        # If detection fails, assume it's not English
+        logger.warning(f"Language detection failed for text: {text[:50]}...")
+        return False
+
 def save_tweet(db, entity_id, tweet, raw_data_tweet):
-    print("🚀 ~ save_tweet ~ tweet:", tweet)
     """Save a tweet to the raw_content table"""
     try:
         if hasattr(raw_data_tweet, "text") and raw_data_tweet.text.startswith("RT @"):
             logger.info(f"Skipping retweet: {raw_data_tweet.id}")
             return None
         
-        # Alternatively, check for retweeted_status attribute which Twitter API uses to indicate retweets
+        # Check if tweet is a retweet
         if hasattr(raw_data_tweet, "retweeted_status"):
             logger.info(f"Skipping retweet: {raw_data_tweet.id}")
             return None
+            
+        # Check if the tweet is in English
+        if not is_english_text(raw_data_tweet.text):
+            logger.info(f"Skipping non-English tweet: {raw_data_tweet.id}")
+            return None
         
+        # Check word count
         word_count = len(raw_data_tweet.text.split())
         if word_count < MIN_TWEET_WORD_COUNT:
             logger.info(f"Skipping tweet with fewer than {MIN_TWEET_WORD_COUNT} words: {raw_data_tweet.id}")
@@ -98,19 +125,23 @@ def save_tweet(db, entity_id, tweet, raw_data_tweet):
             "replies": tweet.public_metrics.get("reply_count", 0) if hasattr(tweet, "public_metrics") else 0,
             "quotes": tweet.public_metrics.get("quote_count", 0) if hasattr(tweet, "public_metrics") else 0
         }
-        print("check1")
+        
         # Check if tweet already exists
         existing = db.query(RawContent).filter(
             RawContent.entity_id == entity_id,
             RawContent.external_id == raw_data_tweet.id
         ).first()
         
-        print("check2")
         if existing:
             logger.debug(f"Tweet {raw_data_tweet.id} already exists in database")
             return existing.id
         
-        print("check3")
+        # Determine language
+        try:
+            language = detect(raw_data_tweet.text)
+        except:
+            language = "unknown"
+        
         # Create new raw_content record
         raw_content = RawContent(
             entity_id=entity_id,
@@ -119,14 +150,14 @@ def save_tweet(db, entity_id, tweet, raw_data_tweet):
             content=raw_data_tweet.text,
             published_at=raw_data_tweet.created_at,
             engagement_metrics=engagement,
+            language=language,  # Store the detected language
             raw_data=raw_data_tweet._json if hasattr(raw_data_tweet, "_json") else json.dumps(raw_data_tweet.__dict__, default=str)
         )
         
-        print("check4")
         db.add(raw_content)
         db.commit()
         db.refresh(raw_content)
-        logger.info(f"Saved tweet {raw_data_tweet.id} to database")
+        logger.info(f"Saved tweet {raw_data_tweet.id} to database (language: {language})")
         return raw_content.id
         
     except Exception as e:
