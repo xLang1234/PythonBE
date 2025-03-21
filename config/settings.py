@@ -21,6 +21,7 @@ COOKIES_FILE = os.getenv("COOKIES_FILE", "cookies.json")
 # Collection settings
 COLLECTION_INTERVAL_MINUTES = int(os.getenv("COLLECTION_INTERVAL_MINUTES", "5"))
 MAX_TWEETS_PER_COLLECTION = int(os.getenv("MAX_TWEETS_PER_COLLECTION", "5"))
+MIN_TWEET_WORD_COUNT = int(os.getenv("MIN_TWEET_WORD_COUNT", "10"))
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

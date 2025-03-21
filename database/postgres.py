@@ -4,7 +4,7 @@ from sqlalchemy.orm import sessionmaker
 from loguru import logger
 import json
 
-from config.settings import DB_URL
+from config.settings import DB_URL, MIN_TWEET_WORD_COUNT
 
 # Create SQLAlchemy engine
 engine = create_engine(DB_URL)
@@ -84,6 +84,11 @@ def save_tweet(db, entity_id, tweet, raw_data_tweet):
         # Alternatively, check for retweeted_status attribute which Twitter API uses to indicate retweets
         if hasattr(raw_data_tweet, "retweeted_status"):
             logger.info(f"Skipping retweet: {raw_data_tweet.id}")
+            return None
+        
+        word_count = len(raw_data_tweet.text.split())
+        if word_count < MIN_TWEET_WORD_COUNT:
+            logger.info(f"Skipping tweet with fewer than {MIN_TWEET_WORD_COUNT} words: {raw_data_tweet.id}")
             return None
         
         # Format engagement metrics
