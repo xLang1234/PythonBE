@@ -27,7 +27,8 @@ models = [
     "google/gemma-3-4b-it:free",
     "mistralai/mistral-7b-instruct:free",
     "anthropic/claude-3-haiku:free",
-    "meta-llama/llama-3-8b-instruct:free"
+    "meta-llama/llama-3-8b-instruct:free",
+    "qwen/qwq-32b:free"
 ]
 
 # Default instruction to prepend to all prompts
