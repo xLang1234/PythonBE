@@ -1,0 +1,9 @@
+Evaluate the newsworthiness of the following crypto-related tweet on a scale from 1 to 10, 
+where 10 is extremely newsworthy and 1 is not newsworthy. Non-crypto-related should be excluded.
+Only facts, no opinions
+
+Display in the format
+Scale : X
+Tags : [y1, y2]
+
+"Evaluate the newsworthiness of the following crypto-related tweet on a scale from 1 to 10, where 10 is extremely newsworthy and 1 is not newsworthy. Non-crypto-related should be excluded. Only facts, no opinions. Strictly display in the format \nScale : X\nTags : [y1, y2]\n I will not accept other formats."

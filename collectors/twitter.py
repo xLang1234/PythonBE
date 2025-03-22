@@ -8,6 +8,10 @@ from twikit import Client
 from config.settings import MAX_TWEETS_PER_COLLECTION, TWITTER_USERNAME, TWITTER_EMAIL, TWITTER_PASSWORD, COOKIES_FILE
 from database.postgres import get_db, get_active_twitter_entities, save_tweet, get_or_create_twitter_source, Entity
 
+# Create a global event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 class TwitterScraper:
     def __init__(self):
         self.client = None
@@ -174,7 +178,8 @@ class TwitterScraper:
             db.close()
 
 def run_async(coro):
-    return asyncio.run(coro)
+    """Run a coroutine in the global event loop without closing it"""
+    return loop.run_until_complete(coro)
 
 def add_default_crypto_accounts():
     scraper = TwitterScraper()

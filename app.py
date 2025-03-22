@@ -65,6 +65,11 @@ def main():
             time.sleep(1)
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt, shutting down...")
+            
+            # Properly close the event loop when shutting down
+            from collectors.twitter import loop
+            loop.close()
+            
             break
         except Exception as e:
             logger.error(f"Error in main loop: {str(e)}")
