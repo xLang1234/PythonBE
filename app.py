@@ -5,7 +5,7 @@ import sys
 import os
 import asyncio
 
-from collectors.twitter import TwitterScraper, add_default_crypto_accounts, collect_twitter_data
+from collectors.twitter import TwitterScraperWithRotation, add_default_crypto_accounts_with_rotation, collect_twitter_data_with_rotation
 from processors.sentiment import SentimentAnalyzer
 from config.settings import COLLECTION_INTERVAL_MINUTES, LOG_LEVEL
 
@@ -35,7 +35,7 @@ def process_data():
 def setup_scheduled_jobs():
     """Setup scheduled jobs"""
     # Schedule Twitter data collection
-    schedule.every(COLLECTION_INTERVAL_MINUTES).minutes.do(collect_twitter_data)
+    schedule.every(COLLECTION_INTERVAL_MINUTES).minutes.do(collect_twitter_data_with_rotation)
     
     # Schedule data processing
     schedule.every(COLLECTION_INTERVAL_MINUTES * 2).minutes.do(process_data)
@@ -45,7 +45,7 @@ def setup_scheduled_jobs():
 def initialize_database():
     """Initialize database with default data if needed"""
     try:
-        add_default_crypto_accounts()
+        add_default_crypto_accounts_with_rotation()
         logger.info("Database initialized with default accounts")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
@@ -61,7 +61,7 @@ def main():
     setup_scheduled_jobs()
     
     # Immediate first run
-    collect_twitter_data()
+    collect_twitter_data_with_rotation()
     process_data()
     
     # Run the scheduler

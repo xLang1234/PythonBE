@@ -1,3 +1,4 @@
+# processors/sentiment.py
 import asyncio
 import aiohttp
 import json
@@ -5,27 +6,26 @@ import os
 import random
 import statistics
 import re
+import time
 from loguru import logger
 from dotenv import load_dotenv
 
 from database.postgres import get_db, RawContent, ProcessedContent
+from utils.api_utils import ApiKeyManager  # Import our new utility
+from api.openrouter import OpenRouterAPI  # Import our OpenRouter client
 
-# Load environment variables from .env file if it exists
+# Load environment variables from .env file
 load_dotenv()
-
-# Get API key from environment variable
-API_KEY = os.environ.get('OPENROUTER_API_KEY')
-if not API_KEY:
-    logger.error("OPENROUTER_API_KEY environment variable is not set. Sentiment analysis will not function.")
-
-API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 class SentimentAnalyzer:
     def __init__(self):
-        # Check if API key is available
-        if not API_KEY:
-            logger.error("Cannot initialize SentimentAnalyzer: OPENROUTER_API_KEY is missing")
-            raise ValueError("OPENROUTER_API_KEY environment variable must be set")
+        # Initialize the OpenRouter API client with automatic key rotation
+        try:
+            self.api_client = OpenRouterAPI()
+            logger.info("SentimentAnalyzer initialized with OpenRouter API client")
+        except ValueError as e:
+            logger.error(f"Cannot initialize SentimentAnalyzer: {str(e)}")
+            raise
             
         # List of models to use for sentiment analysis
         self.models = [
@@ -60,132 +60,85 @@ Return this exact JSON structure with appropriate values:
 REMINDER: Output ONLY the JSON object without any markdown formatting, explanations, or additional text.
 """
 
-        headers = {
-            'Authorization': f'Bearer {API_KEY}',
-            'Content-Type': 'application/json'
-        }
+        # Use our OpenRouter client to make the request with auto key rotation
+        result = await self.api_client.extract_json_from_completion(session, model_name, prompt)
         
-        data = {
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        
-        try:
-            async with session.post(API_URL, json=data, headers=headers) as response:
-                if response.status == 200:
-                    response_json = await response.json()
-                    content = response_json['choices'][0]['message']['content']
-                    
-                    # Clean up response to extract only JSON
-                    content = content.strip()
-                    
-                    # Remove markdown code blocks if present
-                    content = re.sub(r'^```json\s*', '', content)
-                    content = re.sub(r'\s*```$', '', content)
-                    
-                    # Try to parse the JSON response
-                    try:
-                        result = json.loads(content)
-                        
-                        # Validate required fields exist
-                        if not all(k in result for k in ["sentiment_score", "impact_score", "categories", "keywords", "entities_mentioned", "is_crypto_related"]):
-                            missing = [k for k in ["sentiment_score", "impact_score", "categories", "keywords", "entities_mentioned", "is_crypto_related"] if k not in result]
-                            logger.warning(f"Missing fields in response from {model_name}: {missing}")
-                            
-                            # Add missing fields with default values
-                            for field in missing:
-                                if field == "sentiment_score":
-                                    result[field] = 0
-                                elif field == "impact_score":
-                                    result[field] = 0.5
-                                elif field in ["categories", "keywords", "entities_mentioned"]:
-                                    result[field] = []
-                                elif field == "is_crypto_related":
-                                    result[field] = True
-                        
-                        return {
-                            "model": model_name,
-                            "sentiment_score": float(result["sentiment_score"]),  # Ensure numeric
-                            "impact_score": float(result["impact_score"]),  # Ensure numeric
-                            "categories": result["categories"],
-                            "keywords": result["keywords"],
-                            "entities_mentioned": result["entities_mentioned"],
-                            "is_crypto_related": bool(result["is_crypto_related"]),  # Ensure boolean
-                            "status": "success"
-                        }
-                    except (json.JSONDecodeError, ValueError) as e:
-                        logger.error(f"Failed to parse AI response from {model_name}: {e}\nResponse: {content[:200]}")
-                        return {
-                            "model": model_name,
-                            "status": "parse_error"
-                        }
-                else:
-                    logger.error(f"Error from OpenRouter API for {model_name}: {response.status}")
-                    return {
-                        "model": model_name,
-                        "status": "api_error"
-                    }
-        except Exception as e:
-            logger.error(f"Exception in AI analysis with {model_name}: {str(e)}")
+        if not result:
+            logger.warning(f"Failed to get valid response from {model_name}")
             return {
                 "model": model_name,
-                "status": "exception"
+                "status": "api_error"
             }
+            
+        # Validate required fields exist
+        if not all(k in result for k in ["sentiment_score", "impact_score", "categories", "keywords", "entities_mentioned", "is_crypto_related"]):
+            missing = [k for k in ["sentiment_score", "impact_score", "categories", "keywords", "entities_mentioned", "is_crypto_related"] if k not in result]
+            logger.warning(f"Missing fields in response from {model_name}: {missing}")
+            
+            # Add missing fields with default values
+            for field in missing:
+                if field == "sentiment_score":
+                    result[field] = 0
+                elif field == "impact_score":
+                    result[field] = 0.5
+                elif field in ["categories", "keywords", "entities_mentioned"]:
+                    result[field] = []
+                elif field == "is_crypto_related":
+                    result[field] = True
+        
+        return {
+            "model": model_name,
+            "sentiment_score": float(result["sentiment_score"]),  # Ensure numeric
+            "impact_score": float(result["impact_score"]),  # Ensure numeric
+            "categories": result["categories"],
+            "keywords": result["keywords"],
+            "entities_mentioned": result["entities_mentioned"],
+            "is_crypto_related": bool(result["is_crypto_related"]),  # Ensure boolean
+            "status": "success"
+        }
             
     async def generate_summary(self, session, text, analysis_result):
         """Generate a professional summary using an AI model"""
         model_name = "deepseek/deepseek-chat:free"  
         
-        # Define the prompt template for summary generation - updated for brevity without requiring specific data points
+        # Define the prompt template for summary generation - updated for brevity
         prompt = f"""You are a financial analyst writing concise crypto market intelligence.
 
-    Content: "{text}"
+Content: "{text}"
 
-    Analysis data (for context only):
-    - Sentiment: {analysis_result["sentiment_score"]}
-    - Impact: {analysis_result["impact_score"]}
-    - Categories: {', '.join(analysis_result["categories"])}
-    - Entities: {', '.join(analysis_result["entities_mentioned"])}
-    - Keywords: {', '.join(analysis_result["keywords"][:3])}
+Analysis data (for context only):
+- Sentiment: {analysis_result["sentiment_score"]}
+- Impact: {analysis_result["impact_score"]}
+- Categories: {', '.join(analysis_result["categories"])}
+- Entities: {', '.join(analysis_result["entities_mentioned"])}
+- Keywords: {', '.join(analysis_result["keywords"][:3])}
 
-    Write ONE SHORT SENTENCE that begins with "Market Intelligence:" capturing the most essential insight.
-    Be extremely concise (under 80 characters if possible).
-    Focus on the most significant aspect of the content.
-    NO explanations, markdown, or trailing dots.
-    """
+Write ONE SHORT SENTENCE that begins with "Market Intelligence:" capturing the most essential insight.
+Be extremely concise (under 80 characters if possible).
+Focus on the most significant aspect of the content.
+NO explanations, markdown, or trailing dots.
+"""
 
-        headers = {
-            'Authorization': f'Bearer {API_KEY}',
-            'Content-Type': 'application/json'
-        }
+        # Use the chat completion method directly
+        messages = [{"role": "user", "content": prompt}]
+        response = await self.api_client.chat_completion(session, model_name, messages)
         
-        data = {
-            "model": model_name,
-            "messages": [{"role": "user", "content": prompt}]
-        }
+        if not response or 'choices' not in response:
+            logger.error("Failed to generate summary")
+            return ""
+            
+        summary = response['choices'][0]['message']['content'].strip()
         
-        try:
-            async with session.post(API_URL, json=data, headers=headers) as response:
-                if response.status == 200:
-                    response_json = await response.json()
-                    summary = response_json['choices'][0]['message']['content'].strip()
-                    
-                    # Ensure the summary starts with "Market Intelligence:"
-                    if not summary.startswith("Market Intelligence:"):
-                        summary = "Market Intelligence: " + summary
-                    
-                    # Remove any markdown or quotes
-                    summary = re.sub(r'^"|"$', '', summary)
-                    
-                    return summary
-                else:
-                    logger.error(f"Error generating summary: {response.status}")
-                    # Return a shorter fallback summary
-                    return f""
-        except Exception as e:
-            logger.error(f"Exception in summary generation: {str(e)}")
-            return f""
+        # Ensure the summary starts with "Market Intelligence:"
+        if not summary.startswith("Market Intelligence:"):
+            summary = "Market Intelligence: " + summary
         
+        # Remove any markdown or quotes
+        summary = re.sub(r'^"|"$', '', summary)
+        
+        return summary
+        
+    # The rest of the class remains unchanged...
     async def analyze_content(self, text):
         """Use multiple AI models to comprehensively analyze crypto-related content"""
         # Select a subset of models to use for this analysis
