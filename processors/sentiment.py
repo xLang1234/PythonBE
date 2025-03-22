@@ -5,8 +5,22 @@ from nltk.corpus import stopwords
 import re
 from loguru import logger
 import pandas as pd
+import asyncio
+import aiohttp
+import os
+from dotenv import load_dotenv
 
 from database.postgres import get_db, RawContent, ProcessedContent
+
+# Load environment variables from .env file if it exists
+load_dotenv()
+
+# Get API key from environment variable
+API_KEY = os.environ.get('OPENROUTER_API_KEY')
+if not API_KEY:
+    logger.warning("OPENROUTER_API_KEY environment variable is not set. Advanced sentiment analysis will be disabled.")
+
+API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 # Download necessary NLTK data
 try:
@@ -43,6 +57,10 @@ class SentimentAnalyzer:
         ])
         self.stop_words = set(stopwords.words('english'))
         
+        # OpenRouter settings
+        self.use_ai = API_KEY is not None
+        self.default_model = "anthropic/claude-3-haiku:free"  # Default to Claude Haiku for efficiency
+        
     def clean_text(self, text):
         """Clean and prepare text for analysis"""
         # Remove URLs
@@ -78,6 +96,64 @@ class SentimentAnalyzer:
         adjusted_score = max(-1.0, min(1.0, sentiment_score + adjustment))
         
         return adjusted_score
+    
+    async def analyze_with_ai(self, text):
+        """Use AI models via OpenRouter to analyze crypto tweet"""
+        if not self.use_ai:
+            return None, []
+            
+        # Define the prompt template for crypto tweet analysis
+        prompt = f"""Evaluate the newsworthiness of the following crypto-related tweet on a scale from 1 to 10, 
+where 10 is extremely newsworthy and 1 is not newsworthy. If it's not crypto-related, rate it 0.
+Respond in JSON format with two fields only:
+{{
+  "score": [integer 0-10],
+  "tags": [array of relevant crypto tags]
+}}
+
+Tweet: "{text}"
+"""
+
+        headers = {
+            'Authorization': f'Bearer {API_KEY}',
+            'Content-Type': 'application/json'
+        }
+        
+        data = {
+            "model": self.default_model,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(API_URL, json=data, headers=headers) as response:
+                    if response.status == 200:
+                        response_json = await response.json()
+                        content = response_json['choices'][0]['message']['content']
+                        
+                        # Try to parse the JSON response
+                        try:
+                            import json
+                            result = json.loads(content)
+                            score = result.get("score", 5)  # Default to 5 if parsing fails
+                            tags = result.get("tags", [])
+                            
+                            # Normalize score to -1 to 1 range for sentiment
+                            if score == 0:  # Not crypto-related
+                                normalized_score = 0  # Neutral for non-crypto
+                            else:
+                                normalized_score = ((score / 10) * 2) - 1  # Convert 1-10 to -1 to 1
+                                
+                            return normalized_score, tags
+                        except json.JSONDecodeError:
+                            logger.error(f"Failed to parse AI response: {content}")
+                            return None, []
+                    else:
+                        logger.error(f"Error from OpenRouter API: {response.status}")
+                        return None, []
+        except Exception as e:
+            logger.error(f"Exception in AI analysis: {str(e)}")
+            return None, []
     
     def extract_keywords(self, text):
         """Extract keywords from text"""
@@ -128,10 +204,14 @@ class SentimentAnalyzer:
         
         return scaled_impact
     
-    def categorize_content(self, text, entities_mentioned):
-        """Categorize content into topics"""
+    def categorize_content(self, text, entities_mentioned, ai_tags=None):
+        """Categorize content into topics, optionally using AI-generated tags"""
         cleaned_text = self.clean_text(text)
         categories = []
+        
+        # Use AI tags if available
+        if ai_tags and len(ai_tags) > 0:
+            return ai_tags
         
         # Define category keywords
         category_keywords = {
@@ -155,7 +235,7 @@ class SentimentAnalyzer:
                 
         return categories if categories else ["general"]
     
-    def process_unprocessed_content(self, limit=100):
+    async def process_unprocessed_content(self, limit=100):
         """Process unprocessed content from the database"""
         db = next(get_db())
         try:
@@ -172,10 +252,33 @@ class SentimentAnalyzer:
             logger.info(f"Found {len(unprocessed)} unprocessed English content items")
             
             processed_count = 0
-            for content in unprocessed:
+            tasks = []
+            content_items = []
+            
+            # Create tasks for AI analysis if enabled
+            if self.use_ai:
+                for content in unprocessed:
+                    tasks.append(self.analyze_with_ai(content.content))
+                    content_items.append(content)
+                
+                # Run all AI analyses concurrently
+                if tasks:
+                    logger.info(f"Running AI analysis on {len(tasks)} content items")
+                    ai_results = await asyncio.gather(*tasks)
+                else:
+                    ai_results = []
+            else:
+                ai_results = [(None, []) for _ in unprocessed]
+                content_items = unprocessed
+            
+            # Process contents with AI results
+            for i, content in enumerate(content_items):
                 try:
-                    # Analyze sentiment
-                    sentiment_score = self.analyze_sentiment(content.content)
+                    # Get AI results if available
+                    ai_sentiment, ai_tags = ai_results[i] if i < len(ai_results) else (None, [])
+                    
+                    # Analyze sentiment (use AI sentiment if available and valid)
+                    sentiment_score = ai_sentiment if ai_sentiment is not None else self.analyze_sentiment(content.content)
                     
                     # Extract keywords
                     keywords = self.extract_keywords(content.content)
@@ -189,8 +292,8 @@ class SentimentAnalyzer:
                         content.engagement_metrics
                     )
                     
-                    # Categorize content
-                    categories = self.categorize_content(content.content, entities)
+                    # Categorize content (use AI tags if available)
+                    categories = self.categorize_content(content.content, entities, ai_tags)
                     
                     # Create processed content record
                     processed = ProcessedContent(

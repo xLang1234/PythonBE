@@ -18,12 +18,19 @@ logger.add(
 )
 logger.add("logs/collector.log", rotation="1 day", retention="7 days", level=LOG_LEVEL)
 
+# Create global event loop
+loop = asyncio.new_event_loop()
+asyncio.set_event_loop(loop)
+
 def process_data():
     """Process collected data"""
     logger.info("Starting data processing")
     analyzer = SentimentAnalyzer()
-    analyzer.process_unprocessed_content()
-    logger.info("Data processing completed")
+    
+    # Run the async function in the event loop
+    processed_count = loop.run_until_complete(analyzer.process_unprocessed_content())
+    
+    logger.info(f"Data processing completed, processed {processed_count} items")
 
 def setup_scheduled_jobs():
     """Setup scheduled jobs"""
@@ -67,7 +74,6 @@ def main():
             logger.info("Received keyboard interrupt, shutting down...")
             
             # Properly close the event loop when shutting down
-            from collectors.twitter import loop
             loop.close()
             
             break
