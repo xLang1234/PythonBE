@@ -136,42 +136,23 @@ REMINDER: Output ONLY the JSON object without any markdown formatting, explanati
         """Generate a professional summary using an AI model"""
         model_name = "deepseek/deepseek-chat:free"  
         
-        # Format the sentiment and impact into descriptive terms for the prompt
-        sentiment_desc = "neutral"
-        if analysis_result["sentiment_score"] >= 0.6:
-            sentiment_desc = "highly positive"
-        elif analysis_result["sentiment_score"] >= 0.2:
-            sentiment_desc = "positive"
-        elif analysis_result["sentiment_score"] <= -0.6:
-            sentiment_desc = "highly negative"
-        elif analysis_result["sentiment_score"] <= -0.2:
-            sentiment_desc = "negative"
-            
-        impact_desc = "moderate"
-        if analysis_result["impact_score"] >= 0.75:
-            impact_desc = "significant"
-        elif analysis_result["impact_score"] >= 0.5:
-            impact_desc = "notable"
-        elif analysis_result["impact_score"] < 0.3:
-            impact_desc = "minimal"
-        
-        # Define the prompt template for summary generation
-        prompt = f"""You are a professional cryptocurrency market analyst writing for a subscriber newsletter. 
-Create a formal, concise, ONE-SENTENCE summary of this cryptocurrency-related content:
+        # Define the prompt template for summary generation - updated for brevity without requiring specific data points
+        prompt = f"""You are a financial analyst writing concise crypto market intelligence.
 
-Content: "{text}"
+    Content: "{text}"
 
-Analysis details to incorporate:
-- Sentiment: {sentiment_desc}
-- Market impact potential: {impact_desc}
-- Categories: {', '.join(analysis_result["categories"])}
-- Entities mentioned: {', '.join(analysis_result["entities_mentioned"])}
-- Key topics: {', '.join(analysis_result["keywords"][:5])}
+    Analysis data (for context only):
+    - Sentiment: {analysis_result["sentiment_score"]}
+    - Impact: {analysis_result["impact_score"]}
+    - Categories: {', '.join(analysis_result["categories"])}
+    - Entities: {', '.join(analysis_result["entities_mentioned"])}
+    - Keywords: {', '.join(analysis_result["keywords"][:3])}
 
-Write a SINGLE SENTENCE professional summary that begins with "Market Intelligence:" and provides a concise, formal analysis. 
-DO NOT use ellipses or trailing dots. Make the summary complete and self-contained.
-Your summary should be appropriate for financial professionals and investors.
-"""
+    Write ONE SHORT SENTENCE that begins with "Market Intelligence:" capturing the most essential insight.
+    Be extremely concise (under 80 characters if possible).
+    Focus on the most significant aspect of the content.
+    NO explanations, markdown, or trailing dots.
+    """
 
         headers = {
             'Authorization': f'Bearer {API_KEY}',
@@ -199,13 +180,12 @@ Your summary should be appropriate for financial professionals and investors.
                     return summary
                 else:
                     logger.error(f"Error generating summary: {response.status}")
-                    # Return a fallback summary based on analysis
-                    entities = ", ".join(analysis_result["entities_mentioned"][:2]) if analysis_result["entities_mentioned"] else "cryptocurrency markets"
-                    return f"Market Intelligence: {sentiment_desc.capitalize()} sentiment with {impact_desc} impact potential regarding {entities}."
+                    # Return a shorter fallback summary
+                    return f""
         except Exception as e:
             logger.error(f"Exception in summary generation: {str(e)}")
-            return f"Market Intelligence: Analysis of cryptocurrency content with {sentiment_desc} sentiment."
-    
+            return f""
+        
     async def analyze_content(self, text):
         """Use multiple AI models to comprehensively analyze crypto-related content"""
         # Select a subset of models to use for this analysis
@@ -230,11 +210,11 @@ Your summary should be appropriate for financial professionals and investors.
                     # Return default values
                     return {
                         "sentiment_score": 0,
-                        "impact_score": 0.5,
-                        "categories": ["general"],
+                        "impact_score": 0,
+                        "categories": [],
                         "keywords": [],
                         "entities_mentioned": [],
-                        "is_crypto_related": True
+                        "is_crypto_related": False
                     }
                 
                 # Aggregate results from multiple models
