@@ -9,6 +9,8 @@ import asyncio
 import aiohttp
 import os
 from dotenv import load_dotenv
+import json
+import statistics
 
 from database.postgres import get_db, RawContent, ProcessedContent
 
@@ -59,7 +61,15 @@ class SentimentAnalyzer:
         
         # OpenRouter settings
         self.use_ai = API_KEY is not None
-        self.default_model = "anthropic/claude-3-haiku:free"  # Default to Claude Haiku for efficiency
+        # List of models to use for sentiment analysis
+        self.models = [
+            "deepseek/deepseek-chat:free",
+            "anthropic/claude-3-haiku:free",
+            "mistralai/mistral-7b-instruct:free",
+            "meta-llama/llama-3-8b-instruct:free"
+        ]
+        # Number of models to use per analysis (can be adjusted)
+        self.models_per_analysis = 2
         
     def clean_text(self, text):
         """Clean and prepare text for analysis"""
@@ -97,11 +107,8 @@ class SentimentAnalyzer:
         
         return adjusted_score
     
-    async def analyze_with_ai(self, text):
-        """Use AI models via OpenRouter to analyze crypto tweet"""
-        if not self.use_ai:
-            return None, []
-            
+    async def query_model(self, session, model_name, text):
+        """Query a specific model for sentiment analysis"""
         # Define the prompt template for crypto tweet analysis
         prompt = f"""Evaluate the newsworthiness of the following crypto-related tweet on a scale from 1 to 10, 
 where 10 is extremely newsworthy and 1 is not newsworthy. If it's not crypto-related, rate it 0.
@@ -120,39 +127,110 @@ Tweet: "{text}"
         }
         
         data = {
-            "model": self.default_model,
+            "model": model_name,
             "messages": [{"role": "user", "content": prompt}]
         }
         
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(API_URL, json=data, headers=headers) as response:
-                    if response.status == 200:
-                        response_json = await response.json()
-                        content = response_json['choices'][0]['message']['content']
+            async with session.post(API_URL, json=data, headers=headers) as response:
+                if response.status == 200:
+                    response_json = await response.json()
+                    content = response_json['choices'][0]['message']['content']
+                    
+                    # Try to parse the JSON response
+                    try:
+                        result = json.loads(content)
+                        score = result.get("score", 5)  # Default to 5 if parsing fails
+                        tags = result.get("tags", [])
                         
-                        # Try to parse the JSON response
-                        try:
-                            import json
-                            result = json.loads(content)
-                            score = result.get("score", 5)  # Default to 5 if parsing fails
-                            tags = result.get("tags", [])
+                        # Normalize score to -1 to 1 range for sentiment
+                        if score == 0:  # Not crypto-related
+                            normalized_score = 0  # Neutral for non-crypto
+                        else:
+                            normalized_score = ((score / 10) * 2) - 1  # Convert 1-10 to -1 to 1
                             
-                            # Normalize score to -1 to 1 range for sentiment
-                            if score == 0:  # Not crypto-related
-                                normalized_score = 0  # Neutral for non-crypto
-                            else:
-                                normalized_score = ((score / 10) * 2) - 1  # Convert 1-10 to -1 to 1
-                                
-                            return normalized_score, tags
-                        except json.JSONDecodeError:
-                            logger.error(f"Failed to parse AI response: {content}")
-                            return None, []
-                    else:
-                        logger.error(f"Error from OpenRouter API: {response.status}")
-                        return None, []
+                        return {
+                            "model": model_name,
+                            "score": normalized_score,
+                            "tags": tags,
+                            "status": "success"
+                        }
+                    except json.JSONDecodeError:
+                        logger.error(f"Failed to parse AI response from {model_name}: {content}")
+                        return {
+                            "model": model_name,
+                            "score": None,
+                            "tags": [],
+                            "status": "parse_error"
+                        }
+                else:
+                    logger.error(f"Error from OpenRouter API for {model_name}: {response.status}")
+                    return {
+                        "model": model_name,
+                        "score": None,
+                        "tags": [],
+                        "status": "api_error"
+                    }
         except Exception as e:
-            logger.error(f"Exception in AI analysis: {str(e)}")
+            logger.error(f"Exception in AI analysis with {model_name}: {str(e)}")
+            return {
+                "model": model_name,
+                "score": None,
+                "tags": [],
+                "status": "exception"
+            }
+    
+    async def analyze_with_ai(self, text):
+        """Use multiple AI models via OpenRouter to analyze crypto tweet"""
+        if not self.use_ai:
+            return None, []
+        
+        # Select a subset of models to use for this analysis
+        # This helps to distribute the load and reduce API costs
+        # It also provides redundancy in case one model fails
+        import random
+        models_to_use = random.sample(self.models, min(self.models_per_analysis, len(self.models)))
+        
+        logger.debug(f"Using models for analysis: {models_to_use}")
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                tasks = []
+                for model in models_to_use:
+                    task = self.query_model(session, model, text)
+                    tasks.append(task)
+                
+                results = await asyncio.gather(*tasks)
+                
+                # Filter out failed results
+                valid_results = [r for r in results if r["score"] is not None]
+                
+                if not valid_results:
+                    logger.warning(f"All AI models failed to analyze: {text[:50]}...")
+                    return None, []
+                
+                # Aggregate results
+                scores = [r["score"] for r in valid_results]
+                all_tags = []
+                for r in valid_results:
+                    all_tags.extend(r["tags"])
+                
+                # Calculate median score for robustness
+                median_score = statistics.median(scores)
+                
+                # Count tag frequency
+                tag_counts = {}
+                for tag in all_tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+                
+                # Keep tags mentioned by multiple models or by a single model if only one succeeded
+                threshold = 1 if len(valid_results) == 1 else 2
+                consensus_tags = [tag for tag, count in tag_counts.items() if count >= threshold]
+                
+                return median_score, consensus_tags
+                
+        except Exception as e:
+            logger.error(f"Exception in multi-model AI analysis: {str(e)}")
             return None, []
     
     def extract_keywords(self, text):
@@ -263,7 +341,7 @@ Tweet: "{text}"
                 
                 # Run all AI analyses concurrently
                 if tasks:
-                    logger.info(f"Running AI analysis on {len(tasks)} content items")
+                    logger.info(f"Running multi-model AI analysis on {len(tasks)} content items")
                     ai_results = await asyncio.gather(*tasks)
                 else:
                     ai_results = []
