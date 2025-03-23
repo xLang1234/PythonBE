@@ -136,7 +136,7 @@ NO explanations, markdown, or trailing dots.
         summary = re.sub(r'^"|"$', '', summary)
 
         if tweet_url:
-            summary = f"{summary} [Source]({tweet_url})"
+            summary = f"{summary}"
 
         return summary
 

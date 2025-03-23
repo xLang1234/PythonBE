@@ -1,25 +1,17 @@
 import schedule
 import time
-from loguru import logger
 import sys
 import os
 import asyncio
 
 from collectors.twitter import TwitterScraperWithRotation, add_default_crypto_accounts_with_rotation, collect_twitter_data_with_rotation
 from processors.sentiment import SentimentAnalyzer
-from config.settings import COLLECTION_INTERVAL_MINUTES, LOG_LEVEL
+from config.settings import COLLECTION_INTERVAL_MINUTES
 from constants.log_messages import *
+from utils.logging_config import setup_logging
 
-
-logger.remove()
-logger.add(
-    sys.stdout,
-    level=LOG_LEVEL,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
-logger.add("logs/collector.log", rotation="1 day",
-           retention="7 days", level=LOG_LEVEL)
-
+# Setup logging
+logger = setup_logging()
 
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
