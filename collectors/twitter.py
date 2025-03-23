@@ -7,7 +7,7 @@ from twikit import Client
 
 from config.settings import MAX_TWEETS_PER_COLLECTION, TWITTER_USERNAME, TWITTER_EMAIL, TWITTER_PASSWORD
 from database.postgres import get_db, get_active_twitter_entities, save_tweet, get_or_create_twitter_source, Entity
-from cookie_manager import TwitterCookieManager
+from utils.cookie_manager import TwitterCookieManager
 
 # Create a global event loop
 loop = asyncio.new_event_loop()

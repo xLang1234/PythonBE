@@ -1,4 +1,3 @@
-
 import asyncio
 import aiohttp
 import json
@@ -13,6 +12,7 @@ from dotenv import load_dotenv
 from database.postgres import get_db, RawContent, ProcessedContent, Entity
 from utils.api_utils import ApiKeyManager
 from api.openrouter import OpenRouterAPI
+from constants.log_messages import *
 
 
 load_dotenv()
@@ -23,8 +23,7 @@ class SentimentAnalyzer:
 
         try:
             self.api_client = OpenRouterAPI()
-            logger.info(
-                "SentimentAnalyzer initialized with OpenRouter API client")
+            logger.info(API_MANAGER_INITIALIZED)
         except ValueError as e:
             logger.error(f"Cannot initialize SentimentAnalyzer: {str(e)}")
             raise
@@ -64,7 +63,7 @@ REMINDER: Output ONLY the JSON object without any markdown formatting, explanati
         result = await self.api_client.extract_json_from_completion(session, model_name, prompt)
 
         if not result:
-            logger.warning(f"Failed to get valid response from {model_name}")
+            logger.warning(MODEL_RESPONSE_ERROR.format(model=model_name))
             return {
                 "model": model_name,
                 "status": "api_error"
@@ -74,7 +73,7 @@ REMINDER: Output ONLY the JSON object without any markdown formatting, explanati
             missing = [k for k in ["sentiment_score", "impact_score", "categories",
                                    "keywords", "entities_mentioned", "is_crypto_related"] if k not in result]
             logger.warning(
-                f"Missing fields in response from {model_name}: {missing}")
+                MISSING_FIELDS.format(model=model_name, fields=missing))
 
             for field in missing:
                 if field == "sentiment_score":
@@ -126,7 +125,7 @@ NO explanations, markdown, or trailing dots.
         response = await self.api_client.chat_completion(session, model_name, messages)
 
         if not response or 'choices' not in response:
-            logger.error("Failed to generate summary")
+            logger.error(COMPLETION_ERROR)
             return ""
 
         summary = response['choices'][0]['message']['content'].strip()
@@ -147,7 +146,7 @@ NO explanations, markdown, or trailing dots.
         models_to_use = random.sample(self.models, min(
             self.models_per_analysis, len(self.models)))
 
-        logger.debug(f"Using models for analysis: {models_to_use}")
+        logger.debug(MODELS_SELECTED.format(models=models_to_use))
 
         try:
             async with aiohttp.ClientSession() as session:
@@ -163,7 +162,7 @@ NO explanations, markdown, or trailing dots.
 
                 if not valid_results:
                     logger.warning(
-                        f"All AI models failed to analyze: {text[:50]}...")
+                        ALL_MODELS_FAILED.format(text=text[:50]))
 
                     return {
                         "sentiment_score": 0,
@@ -218,7 +217,7 @@ NO explanations, markdown, or trailing dots.
                 }
 
         except Exception as e:
-            logger.error(f"Exception in multi-model AI analysis: {str(e)}")
+            logger.error(MULTI_MODEL_ERROR.format(error=str(e)))
 
             return {
                 "sentiment_score": 0,
@@ -245,7 +244,7 @@ NO explanations, markdown, or trailing dots.
             ).limit(limit).all()
 
             logger.info(
-                f"Found {len(unprocessed)} unprocessed English content items")
+                UNPROCESSED_FOUND.format(count=len(unprocessed)))
 
             processed_count = 0
 
@@ -257,7 +256,7 @@ NO explanations, markdown, or trailing dots.
 
                         if not analysis_result["is_crypto_related"]:
                             logger.info(
-                                f"Skipping non-crypto content: {content.id}")
+                                SKIP_NON_CRYPTO.format(id=content.id))
                             continue
 
                         entity = db.query(Entity).filter(
@@ -283,19 +282,19 @@ NO explanations, markdown, or trailing dots.
                         db.commit()
                         processed_count += 1
                         logger.info(
-                            f"Processed content {content.id} with source link: {tweet_url}")
+                            CONTENT_PROCESSED.format(id=content.id, url=tweet_url))
 
                     except Exception as e:
                         db.rollback()
                         logger.error(
-                            f"Error processing content {content.id}: {str(e)}")
+                            ANALYZE_ERROR.format(id=content.id, error=str(e)))
                         continue
 
-            logger.info(f"Processed {processed_count} content items")
+            logger.info(DATA_PROCESSING_COMPLETE.format(count=processed_count))
             return processed_count
 
         except Exception as e:
-            logger.error(f"Error in process_unprocessed_content: {str(e)}")
+            logger.error(PROCESS_ERROR.format(error=str(e)))
             return 0
         finally:
             db.close()
