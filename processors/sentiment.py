@@ -1,16 +1,12 @@
 import asyncio
 import aiohttp
-import json
-import os
 import random
 import statistics
 import re
-import time
 from loguru import logger
 from dotenv import load_dotenv
 
 from database.postgres import get_db, RawContent, ProcessedContent, Entity
-from utils.api_utils import ApiKeyManager
 from api.openrouter import OpenRouterAPI
 from constants.log_messages import *
 
@@ -30,7 +26,6 @@ class SentimentAnalyzer:
 
         self.models = [
             "deepseek/deepseek-chat:free",
-            "anthropic/claude-3-haiku:free",
             "mistralai/mistral-7b-instruct:free",
             "meta-llama/llama-3-8b-instruct:free",
             "qwen/qwq-32b:free"
